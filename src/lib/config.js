@@ -11,6 +11,9 @@ export const GOOGLE_SCOPES = [
 
 export const SPREADSHEET_NAME = 'TradeLoggerData'
 
+// Must exactly match an "Authorized redirect URI" on the OAuth client.
+export const GOOGLE_REDIRECT_URI = 'https://finnyrajmann.github.io/trade-logger/'
+
 export const SHEET_TRADES = 'Trades'
 export const SHEET_TODOS = 'Todos'
 export const SHEET_CATEGORIES = 'Categories'
