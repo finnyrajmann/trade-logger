@@ -41,6 +41,13 @@ async function fetchProfile(accessToken) {
   return res.json()
 }
 
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(null), ms)),
+  ])
+}
+
 // Interactive sign-in (shows Google popup). Call from a click handler.
 export async function signIn() {
   const client = await ensureTokenClient()
@@ -59,17 +66,24 @@ export async function signIn() {
   return currentProfile
 }
 
-// Silent refresh, no popup if already consented. Falls back to null on failure.
+// Silent refresh, no popup if already consented. Falls back to null on failure
+// or if Google never calls back (can happen when third-party cookies are
+// blocked — this is what causes an infinite "Checking sign-in…" without a
+// timeout guard).
 async function silentRefresh() {
   try {
     const client = await ensureTokenClient()
-    const token = await new Promise((resolve, reject) => {
-      client.callback = (resp) => {
-        if (resp.error) return reject(new Error(resp.error))
-        resolve(resp)
-      }
-      client.requestAccessToken({ prompt: '' })
-    })
+    const token = await withTimeout(
+      new Promise((resolve, reject) => {
+        client.callback = (resp) => {
+          if (resp.error) return reject(new Error(resp.error))
+          resolve(resp)
+        }
+        client.requestAccessToken({ prompt: '' })
+      }),
+      4000
+    )
+    if (!token) return null
     currentToken = {
       access_token: token.access_token,
       expires_at: Date.now() + (Number(token.expires_in) || 3500) * 1000,
