@@ -1,36 +1,45 @@
-import { GOOGLE_CLIENT_ID, GOOGLE_SCOPES } from './config'
+// Redirect-based OAuth (no popup, no third-party-cookie dependency).
+// Sign-in navigates the whole page to Google and back with the token in the
+// URL fragment — this works even in privacy-hardened browsers that block the
+// popup postMessage relay Google's other SDK relies on.
 
-let tokenClient = null
-let currentToken = null // { access_token, expires_at }
-let currentProfile = null // { email, name, picture }
+import { GOOGLE_CLIENT_ID, GOOGLE_SCOPES, GOOGLE_REDIRECT_URI } from './config'
 
-function waitForGis() {
-  return new Promise((resolve, reject) => {
-    if (window.google?.accounts?.oauth2) return resolve()
-    let tries = 0
-    const iv = setInterval(() => {
-      tries += 1
-      if (window.google?.accounts?.oauth2) {
-        clearInterval(iv)
-        resolve()
-      } else if (tries > 100) {
-        clearInterval(iv)
-        reject(new Error('Google Identity Services failed to load'))
-      }
-    }, 100)
-  })
+const LS_AUTH_KEY = 'tradelogger:auth' // { access_token, expires_at, profile }
+
+function saveSession(access_token, expires_in, profile) {
+  const session = {
+    access_token,
+    expires_at: Date.now() + (Number(expires_in) || 3500) * 1000,
+    profile,
+  }
+  localStorage.setItem(LS_AUTH_KEY, JSON.stringify(session))
+  return session
 }
 
-async function ensureTokenClient() {
-  await waitForGis()
-  if (!tokenClient) {
-    tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
-      scope: GOOGLE_SCOPES,
-      callback: () => {}, // overridden per-request below
-    })
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(LS_AUTH_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
   }
-  return tokenClient
+}
+
+function clearSession() {
+  localStorage.removeItem(LS_AUTH_KEY)
+}
+
+function buildAuthUrl(prompt) {
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: GOOGLE_REDIRECT_URI,
+    response_type: 'token',
+    scope: GOOGLE_SCOPES,
+    include_granted_scopes: 'true',
+    prompt,
+  })
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
 }
 
 async function fetchProfile(accessToken) {
@@ -41,85 +50,61 @@ async function fetchProfile(accessToken) {
   return res.json()
 }
 
-function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((resolve) => setTimeout(() => resolve(null), ms)),
-  ])
+// Call once on app load, before rendering. If the URL contains a fresh token
+// (we just came back from Google), it's captured, saved, and the hash is
+// stripped from the address bar.
+async function captureRedirectToken() {
+  if (!window.location.hash.includes('access_token')) return null
+  const params = new URLSearchParams(window.location.hash.slice(1))
+  const accessToken = params.get('access_token')
+  const expiresIn = params.get('expires_in')
+  const error = params.get('error')
+
+  // Clean the sensitive fragment out of the URL/history either way.
+  const clean = window.location.origin + window.location.pathname
+  window.history.replaceState({}, document.title, clean)
+
+  if (error || !accessToken) return null
+
+  const profile = await fetchProfile(accessToken)
+  return saveSession(accessToken, expiresIn, profile)
 }
 
-// Interactive sign-in (shows Google popup). Call from a click handler.
-export async function signIn() {
-  const client = await ensureTokenClient()
-  const token = await new Promise((resolve, reject) => {
-    client.callback = (resp) => {
-      if (resp.error) return reject(new Error(resp.error))
-      resolve(resp)
-    }
-    client.requestAccessToken({ prompt: 'consent' })
-  })
-  currentToken = {
-    access_token: token.access_token,
-    expires_at: Date.now() + (Number(token.expires_in) || 3500) * 1000,
-  }
-  currentProfile = await fetchProfile(currentToken.access_token)
-  return currentProfile
+// Interactive sign-in: navigates away from the app to Google's consent page.
+export function signIn() {
+  window.location.href = buildAuthUrl('consent')
+  // Execution stops here (full navigation) — nothing to return.
 }
 
-// Silent refresh, no popup if already consented. Falls back to null on failure
-// or if Google never calls back (can happen when third-party cookies are
-// blocked — this is what causes an infinite "Checking sign-in…" without a
-// timeout guard).
-async function silentRefresh() {
-  try {
-    const client = await ensureTokenClient()
-    const token = await withTimeout(
-      new Promise((resolve, reject) => {
-        client.callback = (resp) => {
-          if (resp.error) return reject(new Error(resp.error))
-          resolve(resp)
-        }
-        client.requestAccessToken({ prompt: '' })
-      }),
-      4000
-    )
-    if (!token) return null
-    currentToken = {
-      access_token: token.access_token,
-      expires_at: Date.now() + (Number(token.expires_in) || 3500) * 1000,
-    }
-    return currentToken.access_token
-  } catch {
-    return null
+export function signOut() {
+  const session = loadSession()
+  clearSession()
+  if (session?.access_token) {
+    // Best-effort revoke; ignore failures.
+    fetch(`https://oauth2.googleapis.com/revoke?token=${session.access_token}`, {
+      method: 'POST',
+    }).catch(() => {})
   }
 }
 
 export async function getAccessToken() {
-  if (currentToken && currentToken.expires_at - Date.now() > 60_000) {
-    return currentToken.access_token
+  const session = loadSession()
+  if (session && session.expires_at - Date.now() > 60_000) {
+    return session.access_token
   }
-  const refreshed = await silentRefresh()
-  if (!refreshed) throw new Error('NEED_SIGN_IN')
-  return refreshed
+  throw new Error('NEED_SIGN_IN')
 }
 
-export function getProfile() {
-  return currentProfile
-}
-
-export function signOut() {
-  if (currentToken?.access_token && window.google?.accounts?.oauth2?.revoke) {
-    window.google.accounts.oauth2.revoke(currentToken.access_token, () => {})
-  }
-  currentToken = null
-  currentProfile = null
-}
-
+// Called once on app load. Resolves to a profile if the user is signed in
+// (either just redirected back from Google, or a still-valid saved session),
+// otherwise null — never hangs, no silent network round trip required.
 export async function tryRestoreSession() {
-  // Attempt a silent token grab (works if the browser still has an active
-  // Google session and the user previously granted consent).
-  const token = await silentRefresh()
-  if (!token) return null
-  currentProfile = await fetchProfile(token)
-  return currentProfile
+  const fromRedirect = await captureRedirectToken()
+  if (fromRedirect) return fromRedirect.profile
+
+  const session = loadSession()
+  if (session && session.expires_at - Date.now() > 60_000) {
+    return session.profile
+  }
+  return null
 }

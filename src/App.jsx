@@ -76,18 +76,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function handleSignIn() {
+  function handleSignIn() {
     setSigningIn(true)
-    try {
-      const prof = await gSignIn()
-      setProfile(prof)
-      setAuthState('in')
-      await bootstrap(prof)
-    } catch (e) {
-      flash('Sign-in failed. Try again.', true)
-    } finally {
-      setSigningIn(false)
-    }
+    gSignIn() // navigates away to Google; app reloads on return
   }
 
   function handleSignOut() {
