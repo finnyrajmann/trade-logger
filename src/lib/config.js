@@ -4,7 +4,12 @@ export const GOOGLE_CLIENT_ID =
   '1060043385064-vqasepolj9qugcbr1bltgg4ai0qt6v7u.apps.googleusercontent.com'
 
 // drive.file: app can only see/create files it created itself (not your whole Drive).
+// openid/email/profile: needed so the app can fetch your basic profile (name, email)
+// to show who's signed in — this is what was missing, causing the 401 on userinfo.
 export const GOOGLE_SCOPES = [
+  'openid',
+  'email',
+  'profile',
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/drive.file',
 ].join(' ')
