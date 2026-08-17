@@ -1,0 +1,27 @@
+// Public OAuth Client ID — safe to expose in frontend code (this is how
+// Google's browser-based OAuth flow works; there is no client secret here).
+export const GOOGLE_CLIENT_ID =
+  '1060043385064-vqasepolj9qugcbr1bltgg4ai0qt6v7u.apps.googleusercontent.com'
+
+// drive.file: app can only see/create files it created itself (not your whole Drive).
+export const GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/drive.file',
+].join(' ')
+
+export const SPREADSHEET_NAME = 'TradeLoggerData'
+
+export const SHEET_TRADES = 'Trades'
+export const SHEET_TODOS = 'Todos'
+export const SHEET_CATEGORIES = 'Categories'
+
+export const TRADES_HEADERS = [
+  'id', 'groupId', 'symbol', 'entryPrice', 'entryDate',
+  'openQty', 'exitPrice', 'exitQty', 'exitDate', 'pnl', 'status',
+]
+
+export const TODOS_HEADERS = ['id', 'categoryId', 'text', 'done', 'createdDate']
+
+export const CATEGORIES_HEADERS = ['id', 'name']
+
+export const LS_SPREADSHEET_ID_PREFIX = 'tradelogger:spreadsheetId:'
