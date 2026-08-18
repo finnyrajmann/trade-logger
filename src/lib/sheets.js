@@ -119,7 +119,12 @@ export async function fetchAllData(spreadsheetId) {
   const ranges = [SHEET_TRADES, SHEET_TODOS, SHEET_CATEGORIES]
     .map((r) => `ranges=${encodeURIComponent(r)}`)
     .join('&')
-  const data = await authFetch(`${SHEETS_BASE}/${spreadsheetId}/values:batchGet?${ranges}`)
+  // UNFORMATTED_VALUE: without this, Sheets returns numbers as *display*
+  // strings (e.g. "1,234.50" for a stock over Rs.1,000), which breaks Number()
+  // parsing everywhere downstream. This returns the real underlying numbers.
+  const data = await authFetch(
+    `${SHEETS_BASE}/${spreadsheetId}/values:batchGet?${ranges}&valueRenderOption=UNFORMATTED_VALUE`
+  )
   const [trades, todos, categories] = data.valueRanges.map((vr) => vr.values || [])
   return {
     trades: rowsToObjects(trades, TRADES_HEADERS),

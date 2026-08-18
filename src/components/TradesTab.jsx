@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
-import { fmtMoney, fmtNum, groupColor, groupTag } from '../lib/calc'
+import { fmtMoney, fmtNum, groupColor, daysBetween, todayISO } from '../lib/calc'
 import AddTradeModal from './AddTradeModal'
 import ExitModal from './ExitModal'
+
+const OPEN_COLS = '78px 72px 56px 84px 60px 128px'
+const CLOSED_COLS = '78px 72px 72px 56px 84px 84px 52px 90px'
 
 export default function TradesTab({ trades, onAddEntry, onMarkExit, onDeleteOpen }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -22,10 +25,20 @@ export default function TradesTab({ trades, onAddEntry, onMarkExit, onDeleteOpen
     return m
   }, [trades])
 
-  const totalPnl = useMemo(
-    () => closed.reduce((s, t) => s + (Number(t.pnl) || 0), 0),
+  const closedWithDays = useMemo(
+    () => closed.map((t) => ({ ...t, _days: daysBetween(t.entryDate, t.exitDate) })),
     [closed]
   )
+
+  const totalPnl = useMemo(
+    () => closedWithDays.reduce((s, t) => s + (Number(t.pnl) || 0), 0),
+    [closedWithDays]
+  )
+  const avgDays = useMemo(() => {
+    const withDays = closedWithDays.filter((t) => t._days !== null)
+    if (!withDays.length) return null
+    return Math.round(withDays.reduce((s, t) => s + t._days, 0) / withDays.length)
+  }, [closedWithDays])
 
   return (
     <>
@@ -33,34 +46,60 @@ export default function TradesTab({ trades, onAddEntry, onMarkExit, onDeleteOpen
         <span>Open positions</span>
         <span>{open.length}</span>
       </div>
-      {open.length === 0 && <div className="empty-state">No open positions. Tap + to add an entry.</div>}
-      {open.map((t) => (
-        <TradeCard
-          key={t.id}
-          t={t}
-          linked={groupCounts[t.groupId] > 1}
-          onMarkExit={() => setExitTarget(t)}
-          onDelete={() => onDeleteOpen(t)}
-        />
-      ))}
+      {open.length === 0 ? (
+        <div className="empty-state">No open positions. Tap + to add an entry.</div>
+      ) : (
+        <div className="trade-table-wrap">
+          <div className="trade-row trade-header-row" style={{ gridTemplateColumns: OPEN_COLS }}>
+            <span>Symbol</span>
+            <span>Entry</span>
+            <span>Qty</span>
+            <span>Entry date</span>
+            <span>Days</span>
+            <span>Actions</span>
+          </div>
+          {open.map((t) => (
+            <OpenRow
+              key={t.id}
+              t={t}
+              linked={groupCounts[t.groupId] > 1}
+              onMarkExit={() => setExitTarget(t)}
+              onDelete={() => onDeleteOpen(t)}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="section-label" style={{ marginTop: 22 }}>
         <span>Closed trades</span>
         <span>{closed.length}</span>
       </div>
-      {closed.length === 0 && <div className="empty-state">Closed trades will show up here, locked from editing.</div>}
-      {closed.map((t) => (
-        <TradeCard key={t.id} t={t} linked={groupCounts[t.groupId] > 1} closed />
-      ))}
+      {closed.length === 0 ? (
+        <div className="empty-state">Closed trades will show up here, locked from editing.</div>
+      ) : (
+        <div className="trade-table-wrap">
+          <div className="trade-row trade-header-row" style={{ gridTemplateColumns: CLOSED_COLS }}>
+            <span>Symbol</span>
+            <span>Entry</span>
+            <span>Exit</span>
+            <span>Qty</span>
+            <span>Entry date</span>
+            <span>Exit date</span>
+            <span>Days</span>
+            <span>P&amp;L</span>
+          </div>
+          {closedWithDays.map((t) => (
+            <ClosedRow key={t.id} t={t} linked={groupCounts[t.groupId] > 1} />
+          ))}
+          <div className="trade-row trade-footer-row" style={{ gridTemplateColumns: CLOSED_COLS }}>
+            <span style={{ gridColumn: '1 / 7' }}>TOTAL / AVG</span>
+            <span>{avgDays === null ? '—' : `${avgDays}d`}</span>
+            <span className={totalPnl >= 0 ? 'pnl-value gain' : 'pnl-value loss'}>{fmtMoney(totalPnl)}</span>
+          </div>
+        </div>
+      )}
 
       <button className="fab" onClick={() => setShowAdd(true)} aria-label="Add entry">＋</button>
-
-      <div className="ticker-bar">
-        <span className="label">Total P&amp;L (closed)</span>
-        <span className="value" style={{ color: totalPnl >= 0 ? 'var(--gain)' : 'var(--loss)' }}>
-          {fmtMoney(totalPnl)}
-        </span>
-      </div>
 
       {showAdd && (
         <AddTradeModal
@@ -86,73 +125,41 @@ export default function TradesTab({ trades, onAddEntry, onMarkExit, onDeleteOpen
   )
 }
 
-function TradeCard({ t, linked, closed, onMarkExit, onDelete }) {
+function OpenRow({ t, linked, onMarkExit, onDelete }) {
+  const daysOpen = daysBetween(t.entryDate, todayISO())
+  return (
+    <div className="trade-row" style={{ gridTemplateColumns: OPEN_COLS }}>
+      <span className="cell-symbol">
+        {linked && <span className="group-dot" style={{ background: groupColor(t.groupId) }} />}
+        {t.symbol}
+      </span>
+      <span>₹{t.entryPrice}</span>
+      <span>{fmtNum(t.openQty)}</span>
+      <span className="cell-muted">{t.entryDate}</span>
+      <span className="cell-muted">{daysOpen === null ? '—' : `${daysOpen}d`}</span>
+      <span className="trade-actions-cell">
+        <button className="icon-action-btn primary" onClick={onMarkExit}>Exit</button>
+        <button className="icon-action-btn danger" onClick={onDelete}>Del</button>
+      </span>
+    </div>
+  )
+}
+
+function ClosedRow({ t, linked }) {
   const pnl = Number(t.pnl) || 0
   return (
-    <div className={`card ${closed ? 'closed' : ''}`}>
-      <div className="card-top">
-        <div className="symbol">
-          {t.symbol}
-          {linked && (
-            <span
-              className="group-tag"
-              style={{ background: groupColor(t.groupId) + '22', color: groupColor(t.groupId) }}
-              title="Part of a multi-exit entry"
-            >
-              #{groupTag(t.groupId)}
-            </span>
-          )}
-        </div>
-        <span className={`pill ${closed ? 'closed' : 'open'}`}>{closed ? 'Closed' : 'Open'}</span>
-      </div>
-
-      <div className="card-grid">
-        <div>
-          <div className="field-label">Entry</div>
-          <div className="field-value">₹{t.entryPrice}</div>
-        </div>
-        <div>
-          <div className="field-label">{closed ? 'Exit qty' : 'Open qty'}</div>
-          <div className="field-value">{fmtNum(closed ? t.exitQty : t.openQty)}</div>
-        </div>
-        <div>
-          <div className="field-label">{closed ? 'Exit' : 'Entry date'}</div>
-          <div className="field-value">{closed ? `₹${t.exitPrice}` : t.entryDate}</div>
-        </div>
-      </div>
-
-      {closed && (
-        <div className="card-grid" style={{ marginTop: 8 }}>
-          <div>
-            <div className="field-label">Exit date</div>
-            <div className="field-value">{t.exitDate}</div>
-          </div>
-          <div>
-            <div className="field-label">P&amp;L</div>
-            <div className={`field-value pnl-value ${pnl >= 0 ? 'gain' : 'loss'}`}>{fmtMoney(pnl)}</div>
-          </div>
-          <div />
-        </div>
-      )}
-
-      {!closed && (
-        <div className="card-actions">
-          <button className="danger" onClick={onDelete}>Delete</button>
-          <button className="primary" onClick={onMarkExit}>Mark exit</button>
-        </div>
-      )}
-
-      {linked && (
-        <div className="link-strip">
-          <span
-            style={{
-              width: 6, height: 6, borderRadius: '50%',
-              background: groupColor(t.groupId), display: 'inline-block',
-            }}
-          />
-          Linked to other exits from this same entry
-        </div>
-      )}
+    <div className="trade-row closed" style={{ gridTemplateColumns: CLOSED_COLS }}>
+      <span className="cell-symbol">
+        {linked && <span className="group-dot" style={{ background: groupColor(t.groupId) }} />}
+        {t.symbol}
+      </span>
+      <span>₹{t.entryPrice}</span>
+      <span>₹{t.exitPrice}</span>
+      <span>{fmtNum(t.exitQty)}</span>
+      <span className="cell-muted">{t.entryDate}</span>
+      <span className="cell-muted">{t.exitDate}</span>
+      <span className="cell-muted">{t._days === null ? '—' : `${t._days}d`}</span>
+      <span className={pnl >= 0 ? 'pnl-value gain' : 'pnl-value loss'}>{fmtMoney(pnl)}</span>
     </div>
   )
 }

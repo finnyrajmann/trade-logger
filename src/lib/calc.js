@@ -20,6 +20,15 @@ export function todayISO() {
   return local.toISOString().slice(0, 10)
 }
 
+// Whole calendar days between two ISO date strings (YYYY-MM-DD).
+export function daysBetween(startISO, endISO) {
+  if (!startISO || !endISO) return null
+  const start = new Date(startISO + 'T00:00:00')
+  const end = new Date(endISO + 'T00:00:00')
+  const diff = Math.round((end - start) / 86400000)
+  return Number.isFinite(diff) ? diff : null
+}
+
 // Deterministic small color set for group-link badges, derived from groupId.
 const GROUP_COLORS = ['#E8A33D', '#5DA9E9', '#C77DFF', '#4CAF6D', '#E1594C', '#6FD3C7']
 export function groupColor(groupId) {
